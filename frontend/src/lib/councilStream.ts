@@ -37,6 +37,16 @@ export interface DoneData {
   >;
 }
 
+/** Structured execution trace event (Loop 3, additive). `ts` is wall-clock
+ * epoch milliseconds so the Details timeline can plot genuinely overlapping
+ * model execution windows. */
+export interface TraceData {
+  stage: string;
+  ts: number;
+  model?: string;
+  detail?: Record<string, unknown>;
+}
+
 export interface CouncilStreamHandlers {
   onRunStart?: (data: RunStartData) => void;
   onModelStart?: (data: ModelStartData) => void;
@@ -47,16 +57,23 @@ export interface CouncilStreamHandlers {
   onArbiterDone?: (data: ArbiterDoneData) => void;
   onArbiterError?: (data: ArbiterErrorData) => void;
   onDone?: (data: DoneData) => void;
+  onTrace?: (data: TraceData) => void;
   onConnectionError?: (error: unknown) => void;
 }
 
 /** Parses a raw SSE text stream (as delivered by the fetch body reader) into
- * {event, data} frames. Exported for unit testing without a network layer. */
+ * {event, data} frames. Exported for unit testing without a network layer.
+ *
+ * SSE frames are separated by a blank line, and per the spec individual
+ * lines may be terminated by \n, \r\n, or \r. sse-starlette (the backend's
+ * SSE implementation) emits \r\n line endings, so both the frame separator
+ * and the per-line split below must tolerate \r. */
 export function parseSSEChunk(
   buffer: string
 ): { frames: { event: string; data: string }[]; rest: string } {
+  const normalized = buffer.replace(/\r\n/g, "\n");
   const frames: { event: string; data: string }[] = [];
-  const parts = buffer.split("\n\n");
+  const parts = normalized.split("\n\n");
   const rest = parts.pop() ?? "";
 
   for (const part of parts) {
@@ -160,6 +177,9 @@ function dispatchFrame(
       break;
     case "done":
       handlers.onDone?.(parsed as DoneData);
+      break;
+    case "trace":
+      handlers.onTrace?.(parsed as TraceData);
       break;
     default:
       break;

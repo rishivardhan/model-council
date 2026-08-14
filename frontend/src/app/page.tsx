@@ -1,14 +1,18 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useCallback } from "react";
 import { PromptBar } from "@/components/PromptBar";
 import { ArbiterBanner } from "@/components/ArbiterBanner";
 import { StreamColumn } from "@/components/StreamColumn";
+import { DetailsPanel } from "@/components/DetailsPanel";
 import { useCouncilRun } from "@/lib/useCouncilRun";
 import { useKeyboardShortcuts } from "@/lib/useKeyboardShortcuts";
+import { useTrace } from "@/lib/useTrace";
 import styles from "./page.module.css";
 
 export default function Home() {
+  const { events: traceEvents, record: recordTrace, reset: resetTrace } = useTrace();
+
   const {
     prompt,
     setPrompt,
@@ -25,9 +29,10 @@ export default function Home() {
     effectiveWinner,
     isOverridden,
     lastSubmittedPrompt,
-  } = useCouncilRun();
+  } = useCouncilRun({ onTrace: recordTrace, onRunReset: resetTrace });
 
   const promptRef = useRef<HTMLTextAreaElement>(null);
+  const [rawOpen, setRawOpen] = useState(false);
   const [detailsOpen, setDetailsOpen] = useState(false);
 
   useKeyboardShortcuts({
@@ -45,8 +50,10 @@ export default function Home() {
 
   // Auto-expand raw outputs once a run has finished, still collapsible.
   useEffect(() => {
-    if (phase === "done") setDetailsOpen(true);
+    if (phase === "done") setRawOpen(true);
   }, [phase]);
+
+  const toggleDetails = useCallback(() => setDetailsOpen((v) => !v), []);
 
   return (
     <main className={styles.main}>
@@ -70,19 +77,33 @@ export default function Home() {
         onClearOverride={() => setOverrideWinner(null)}
       />
 
-      <button
-        type="button"
-        className={styles.detailsToggle}
-        onClick={() => setDetailsOpen((v) => !v)}
-        data-testid="details-toggle"
-      >
-        {detailsOpen ? "Hide" : "Show"} raw responses ({models.length})
-      </button>
+      <div className={styles.toggleRow}>
+        <button
+          type="button"
+          className={styles.detailsToggle}
+          onClick={() => setRawOpen((v) => !v)}
+          data-testid="raw-toggle"
+        >
+          {rawOpen ? "Hide" : "Show"} raw responses ({models.length})
+        </button>
+        <button
+          type="button"
+          className={styles.detailsToggle}
+          onClick={toggleDetails}
+          data-testid="details-toggle"
+        >
+          {detailsOpen ? "Hide" : "Show"} details
+        </button>
+      </div>
 
-      {detailsOpen && (
-        <div className={styles.columns} data-testid="columns" style={{
-          gridTemplateColumns: `repeat(${models.length || 3}, 1fr)`,
-        }}>
+      {rawOpen && (
+        <div
+          className={styles.columns}
+          data-testid="columns"
+          style={{
+            gridTemplateColumns: `repeat(${models.length || 3}, 1fr)`,
+          }}
+        >
           {models.map((model, i) => {
             const column = columns[model];
             if (!column) return null;
@@ -98,6 +119,8 @@ export default function Home() {
           })}
         </div>
       )}
+
+      {detailsOpen && <DetailsPanel events={traceEvents} models={models} />}
     </main>
   );
 }

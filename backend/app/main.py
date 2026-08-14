@@ -45,6 +45,14 @@ async def council_stream(prompt: str):
       arbiter_start
       arbiter_done - {winner, rationale, raw}
       arbiter_error- {error}
+      trace        - {stage, ts, model?, detail} - structured execution trace,
+                      additive (Loop 3): request_received, all_models_dispatched,
+                      model_dispatched, model_completed, model_failed,
+                      arbiter_invoked, arbiter_completed, arbiter_failed,
+                      run_complete. `ts` is wall-clock epoch milliseconds so
+                      overlapping model timestamps can be plotted on a
+                      timeline. Consumers that only care about Loop 1/2
+                      behavior can ignore this event type entirely.
       done         - {results: {model: {ok, error, token_count, latency_ms}}}
     """
 

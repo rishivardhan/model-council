@@ -2,7 +2,7 @@
 
 import { useCallback, useRef, useState } from "react";
 import { COUNCIL_STREAM_URL } from "@/lib/backend";
-import { streamCouncil } from "@/lib/councilStream";
+import { streamCouncil, type TraceData } from "@/lib/councilStream";
 
 export type ColumnStatus = "idle" | "streaming" | "done" | "error";
 
@@ -28,7 +28,19 @@ export type RunPhase = "idle" | "running" | "arbitrating" | "done";
 
 const EMPTY_COLUMN = (model: string): ColumnState => ({ model, text: "", status: "idle" });
 
-export function useCouncilRun() {
+export interface UseCouncilRunOptions {
+  /** Called for every Loop-3 structured trace event. Delivered via a ref so
+   * it never forces the streaming callback identity (and therefore the hot
+   * token-update path) to change - passing a new inline function on every
+   * render of the caller is safe and does not add re-render overhead to the
+   * main streaming columns. */
+  onTrace?: (data: TraceData) => void;
+  /** Called once at the start of each new run, before any events arrive -
+   * use it to clear a previous run's trace events. */
+  onRunReset?: () => void;
+}
+
+export function useCouncilRun(options: UseCouncilRunOptions = {}) {
   const [prompt, setPrompt] = useState("");
   const [lastSubmittedPrompt, setLastSubmittedPrompt] = useState("");
   const [models, setModels] = useState<string[]>([]);
@@ -40,6 +52,10 @@ export function useCouncilRun() {
   const [overrideWinner, setOverrideWinner] = useState<string | null>(null);
 
   const abortRef = useRef<AbortController | null>(null);
+  const onTraceRef = useRef(options.onTrace);
+  onTraceRef.current = options.onTrace;
+  const onRunResetRef = useRef(options.onRunReset);
+  onRunResetRef.current = options.onRunReset;
 
   const run = useCallback(async (promptText: string) => {
     const trimmed = promptText.trim();
@@ -56,6 +72,7 @@ export function useCouncilRun() {
     setColumns({});
     setModels([]);
     setPhase("running");
+    onRunResetRef.current?.();
 
     await streamCouncil(
       COUNCIL_STREAM_URL,
@@ -132,6 +149,9 @@ export function useCouncilRun() {
         onConnectionError: (err) => {
           setArbiterError(err instanceof Error ? err.message : String(err));
           setPhase("done");
+        },
+        onTrace: (data) => {
+          onTraceRef.current?.(data);
         },
       },
       controller.signal

@@ -57,6 +57,13 @@ class CouncilRunResult:
     results: dict[str, ModelResult] = field(default_factory=dict)
 
 
+def _now_ms() -> float:
+    """Wall-clock epoch milliseconds - used only for trace events so the
+    client can plot genuinely overlapping timestamps on a timeline. Internal
+    latency math still uses time.monotonic() elsewhere."""
+    return time.time() * 1000
+
+
 async def _stream_one_model(
     model_name: str,
     prompt: str,
@@ -68,7 +75,19 @@ async def _stream_one_model(
     result_holder[model_name] = result
     chain = make_chain(model_name)
 
+    dispatch_ts = _now_ms()
     await queue.put({"event": "model_start", "data": {"model": model_name}})
+    await queue.put(
+        {
+            "event": "trace",
+            "data": {
+                "stage": "model_dispatched",
+                "model": model_name,
+                "ts": dispatch_ts,
+                "detail": {"request": {"prompt": prompt, "model": model_name}},
+            },
+        }
+    )
 
     try:
         astream = chain.astream({"input": prompt})
@@ -88,13 +107,29 @@ async def _stream_one_model(
 
         await asyncio.wait_for(_consume(), timeout=MODEL_TIMEOUT_SECONDS)
         result.completed_at = time.monotonic()
+        latency_ms = round((result.completed_at - result.started_at) * 1000, 1)
         await queue.put(
             {
                 "event": "model_done",
                 "data": {
                     "model": model_name,
-                    "latency_ms": round((result.completed_at - result.started_at) * 1000, 1),
+                    "latency_ms": latency_ms,
                     "token_count": result.token_count,
+                },
+            }
+        )
+        await queue.put(
+            {
+                "event": "trace",
+                "data": {
+                    "stage": "model_completed",
+                    "model": model_name,
+                    "ts": _now_ms(),
+                    "detail": {
+                        "latency_ms": latency_ms,
+                        "token_count": result.token_count,
+                        "response_preview": result.text[:500],
+                    },
                 },
             }
         )
@@ -105,12 +140,34 @@ async def _stream_one_model(
         await queue.put(
             {"event": "model_error", "data": {"model": model_name, "error": result.error}}
         )
+        await queue.put(
+            {
+                "event": "trace",
+                "data": {
+                    "stage": "model_failed",
+                    "model": model_name,
+                    "ts": _now_ms(),
+                    "detail": {"error": result.error},
+                },
+            }
+        )
     except Exception as exc:  # noqa: BLE001 - surface any Ollama/connection failure per-model
         result.ok = False
         result.error = str(exc)
         result.completed_at = time.monotonic()
         await queue.put(
             {"event": "model_error", "data": {"model": model_name, "error": result.error}}
+        )
+        await queue.put(
+            {
+                "event": "trace",
+                "data": {
+                    "stage": "model_failed",
+                    "model": model_name,
+                    "ts": _now_ms(),
+                    "detail": {"error": result.error},
+                },
+            }
         )
 
 
@@ -128,10 +185,23 @@ async def run_council_stream(
     result_holder: dict[str, ModelResult] = {}
 
     yield {"event": "run_start", "data": {"models": models, "prompt": prompt}}
+    yield {
+        "event": "trace",
+        "data": {
+            "stage": "request_received",
+            "ts": _now_ms(),
+            "detail": {"prompt": prompt, "models": models},
+        },
+    }
 
+    dispatch_ts = _now_ms()
     tasks = [
         asyncio.create_task(_stream_one_model(m, prompt, queue, result_holder)) for m in models
     ]
+    yield {
+        "event": "trace",
+        "data": {"stage": "all_models_dispatched", "ts": dispatch_ts, "detail": {"models": models}},
+    }
 
     async def _wait_all():
         await asyncio.gather(*tasks)
@@ -150,7 +220,16 @@ async def run_council_stream(
     # Arbiter pass, only over models that succeeded.
     successful = {m: r for m, r in result_holder.items() if r.ok and r.text.strip()}
 
+    arbiter_start_ts = _now_ms()
     yield {"event": "arbiter_start", "data": {}}
+    yield {
+        "event": "trace",
+        "data": {
+            "stage": "arbiter_invoked",
+            "ts": arbiter_start_ts,
+            "detail": {"candidates": list(successful.keys())},
+        },
+    }
 
     if not successful:
         yield {
@@ -160,17 +239,46 @@ async def run_council_stream(
                 "rationale": "All models failed or returned empty output; no verdict possible.",
             },
         }
+        yield {
+            "event": "trace",
+            "data": {
+                "stage": "arbiter_completed",
+                "ts": _now_ms(),
+                "detail": {"winner": None, "reason": "no successful candidates"},
+            },
+        }
     else:
         try:
             verdict = await asyncio.wait_for(
                 run_arbiter(prompt, successful), timeout=ARBITER_TIMEOUT_SECONDS
             )
             yield {"event": "arbiter_done", "data": verdict}
+            yield {
+                "event": "trace",
+                "data": {
+                    "stage": "arbiter_completed",
+                    "ts": _now_ms(),
+                    "detail": {
+                        "winner": verdict.get("winner"),
+                        "rationale": verdict.get("rationale"),
+                        "raw_response": verdict.get("raw"),
+                    },
+                },
+            }
         except Exception as exc:  # noqa: BLE001
             yield {
                 "event": "arbiter_error",
                 "data": {"error": str(exc)},
             }
+            yield {
+                "event": "trace",
+                "data": {"stage": "arbiter_failed", "ts": _now_ms(), "detail": {"error": str(exc)}},
+            }
+
+    yield {
+        "event": "trace",
+        "data": {"stage": "run_complete", "ts": _now_ms(), "detail": {}},
+    }
 
     yield {
         "event": "done",

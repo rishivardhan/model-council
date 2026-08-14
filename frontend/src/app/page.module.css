@@ -21,6 +21,11 @@
   color: var(--text);
 }
 
+.toggleRow {
+  display: flex;
+  gap: 8px;
+}
+
 .detailsToggle {
   align-self: flex-start;
   font-size: 12px;
