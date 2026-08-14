@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useCallback } from "react";
+import { useRef, useState, useCallback } from "react";
 import { PromptBar } from "@/components/PromptBar";
 import { ArbiterBanner } from "@/components/ArbiterBanner";
 import { StreamColumn } from "@/components/StreamColumn";
@@ -13,6 +13,16 @@ import styles from "./page.module.css";
 export default function Home() {
   const { events: traceEvents, record: recordTrace, reset: resetTrace } = useTrace();
 
+  const promptRef = useRef<HTMLTextAreaElement>(null);
+  // null = no explicit user choice yet; falls back to auto-expand once done.
+  const [rawOpenOverride, setRawOpenOverride] = useState<boolean | null>(null);
+  const [detailsOpen, setDetailsOpen] = useState(false);
+
+  const handleRunReset = useCallback(() => {
+    resetTrace();
+    setRawOpenOverride(null);
+  }, [resetTrace]);
+
   const {
     prompt,
     setPrompt,
@@ -24,16 +34,13 @@ export default function Home() {
     isRunning,
     submit,
     rerun,
-    overrideWinner,
     setOverrideWinner,
     effectiveWinner,
     isOverridden,
     lastSubmittedPrompt,
-  } = useCouncilRun({ onTrace: recordTrace, onRunReset: resetTrace });
+  } = useCouncilRun({ onTrace: recordTrace, onRunReset: handleRunReset });
 
-  const promptRef = useRef<HTMLTextAreaElement>(null);
-  const [rawOpen, setRawOpen] = useState(false);
-  const [detailsOpen, setDetailsOpen] = useState(false);
+  const rawOpen = rawOpenOverride ?? phase === "done";
 
   useKeyboardShortcuts({
     onFocusPrompt: () => promptRef.current?.focus(),
@@ -47,11 +54,6 @@ export default function Home() {
     },
     onClearOverride: () => setOverrideWinner(null),
   });
-
-  // Auto-expand raw outputs once a run has finished, still collapsible.
-  useEffect(() => {
-    if (phase === "done") setRawOpen(true);
-  }, [phase]);
 
   const toggleDetails = useCallback(() => setDetailsOpen((v) => !v), []);
 
@@ -81,7 +83,7 @@ export default function Home() {
         <button
           type="button"
           className={styles.detailsToggle}
-          onClick={() => setRawOpen((v) => !v)}
+          onClick={() => setRawOpenOverride((v) => !(v ?? phase === "done"))}
           data-testid="raw-toggle"
         >
           {rawOpen ? "Hide" : "Show"} raw responses ({models.length})

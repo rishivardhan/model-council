@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { COUNCIL_STREAM_URL } from "@/lib/backend";
 import { streamCouncil, type TraceData } from "@/lib/councilStream";
 
@@ -53,9 +53,11 @@ export function useCouncilRun(options: UseCouncilRunOptions = {}) {
 
   const abortRef = useRef<AbortController | null>(null);
   const onTraceRef = useRef(options.onTrace);
-  onTraceRef.current = options.onTrace;
   const onRunResetRef = useRef(options.onRunReset);
-  onRunResetRef.current = options.onRunReset;
+  useEffect(() => {
+    onTraceRef.current = options.onTrace;
+    onRunResetRef.current = options.onRunReset;
+  });
 
   const run = useCallback(async (promptText: string) => {
     const trimmed = promptText.trim();

@@ -12,7 +12,7 @@ vi.mock("@/lib/councilStream", async () => {
 const mockedStreamCouncil = vi.mocked(councilStreamModule.streamCouncil);
 
 function scriptedRunWithTrace() {
-  return vi.fn(async (_url: string, _prompt: string, handlers: any) => {
+  return vi.fn(async (_url: string, _prompt: string, handlers: councilStreamModule.CouncilStreamHandlers) => {
     handlers.onRunStart?.({ models: ["model-a", "model-b"], prompt: "hi" });
     handlers.onTrace?.({ stage: "request_received", ts: 1000 });
     handlers.onTrace?.({ stage: "all_models_dispatched", ts: 1005 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, waitFor, act } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import Home from "./page";
 import * as councilStreamModule from "@/lib/councilStream";
@@ -13,7 +13,7 @@ const mockedStreamCouncil = vi.mocked(councilStreamModule.streamCouncil);
 
 // Utility to drive a scripted run through the mocked streamCouncil.
 function scriptedRun() {
-  return vi.fn(async (_url: string, _prompt: string, handlers: any) => {
+  return vi.fn(async (_url: string, _prompt: string, handlers: councilStreamModule.CouncilStreamHandlers) => {
     handlers.onRunStart?.({ models: ["model-a", "model-b", "model-c"], prompt: "hi" });
     handlers.onModelStart?.({ model: "model-a" });
     handlers.onToken?.({ model: "model-a", token: "```js\nconsole.log(1)\n```" });
